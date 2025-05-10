@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  dynamic_relay:
+    image: tiarhax/dynamic_relay
+    networks:
+      - internal-shared-network
+    env_file: dynamic_relay.env
+    ports:
+      - "${HTTP_PORT}:${DYNAMIC_RELAY_HTTP_PORT}"
+      - "${RTSP_SERVER_PORT}:${DYNAMIC_RELAY_RTSP_PORT}"
+
+  stalechecker:
+    name: stalechecker
+    image: tiarhax/stalechecker
+    networks:
+      - internal-shared-network
+    env_file: stalechecker.env
+
+
+networks:
+  internal-shared-network:
+    driver: bridge
