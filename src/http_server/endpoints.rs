@@ -116,7 +116,7 @@ pub async fn remove_stale_streams(state: State<AppState>) -> Result<String, AppE
         
         streams.iter()
             .filter(|s| { 
-                (current_time - s.added_at).num_minutes() > state.stream_expiration_time_in_minutes
+                (current_time - s.added_at).num_minutes() >= state.stream_expiration_time_in_minutes
             })
             .map(|s| { s.id.clone()})
             .collect::<Vec<String>>()

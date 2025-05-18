@@ -11,7 +11,6 @@ services:
       - "${RTSP_SERVER_PORT}:${DYNAMIC_RELAY_RTSP_PORT}"
 
   stalechecker:
-    name: stalechecker
     image: tiarhax/stalechecker
     networks:
       - internal-shared-network
