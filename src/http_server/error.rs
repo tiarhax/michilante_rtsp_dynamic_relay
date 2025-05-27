@@ -1,17 +1,18 @@
 use axum::{http, response::{IntoResponse, Response}, Json};
 use serde::{de, Deserialize, Serialize};
 
-
+#[derive(Debug)]
 pub struct UserInputError {
     pub status_code: http::StatusCode,
     pub message: String,
     pub details: serde_json::Value
 }
-
+#[derive(Debug)]
 pub struct InternalError {
     pub debug_message: String,
 }
 
+#[derive(Debug)]
 pub enum AppError {
     UserInputError(UserInputError),
     InternalError(InternalError)

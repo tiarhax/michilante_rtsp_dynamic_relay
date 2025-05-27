@@ -16,31 +16,39 @@ pub struct AddStreamOutput {
 
 #[derive(Debug, Deserialize)]
 pub struct AddStreamInput {
-    name: String,
-    source_url: String
+    pub name: String,
+    pub source_url: String,
+    pub down_scale: bool
 }
 
-pub async fn add_stream(
-    State(state): State<AppState>,
-    Json(req): Json<AddStreamInput>
-) -> impl IntoResponse {
+pub async fn add_stream_to_state(state: AppState, req: AddStreamInput) -> Result<AddStreamOutput, AppError> {
+    let media_map_clone = state.media_map.clone();
+    let handle = tokio::runtime::Handle::current();
     let factory = gst_rtsp_server::RTSPMediaFactory::new();
 
     let source_url = req.source_url.clone();
 
 
-    let launch = format!(
-        "rtspsrc location={} latency=0 ! rtph264depay ! h264parse ! avdec_h264 ! videoscale ! video/x-raw,width=640,height=320,format=I420 ! x264enc tune=zerolatency bitrate=500 speed-preset=ultrafast key-int-max=30 ! h264parse ! rtph264pay config-interval=1 name=pay0 pt=96",
-        source_url
-    );
+    let launch = if req.down_scale {
+        format!(
+            "rtspsrc location={} latency=0 ! rtph264depay ! h264parse ! avdec_h264 ! videoscale ! video/x-raw,width=640,height=320,format=I420 ! x264enc tune=zerolatency bitrate=500 speed-preset=ultrafast key-int-max=30 ! h264parse ! rtph264pay config-interval=1 name=pay0 pt=96",
+            source_url
+        )
+    } else {
+        format!(
+            "rtspsrc location={} latency=50 protocols=tcp ! \
+             rtph264depay ! h264parse config-interval=1 ! \
+             rtph264pay name=pay0 pt=96",
+            source_url
+        )
+    };
+    
     factory.set_launch(&launch);
 
     factory.set_shared(true);
     let id =  ulid::Ulid::new();
     let path = format!("/{}", id.to_string());
     let path_clone = path.clone();
-    let media_map_clone = state.media_map.clone();
-    let handle = tokio::runtime::Handle::current();
     factory.connect_media_configure(move |_, media| {
         let mut media_map = task::block_in_place(|| {
             handle.block_on(media_map_clone.lock())
@@ -71,7 +79,21 @@ pub async fn add_stream(
         added_at: chrono::Utc::now(),
     };
     state.streams.lock().await.push(stream_info_internal);
-    Json(output)
+
+    Ok(output)
+}
+
+pub async fn add_stream(
+    State(state): State<AppState>,
+    Json(req): Json<AddStreamInput>
+) -> impl IntoResponse {
+
+
+    
+    match add_stream_to_state(state, req).await {
+        Ok(output) => Ok(Json(output)),
+        Err(err) => Err(err.into_response()),
+    }
 }
 
 async fn remove_stream_by_id(id: &str, state: &State<AppState>) -> Result<(), AppError>  {
