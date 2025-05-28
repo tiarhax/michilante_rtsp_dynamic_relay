@@ -18,6 +18,7 @@ pub struct StreamInfoInternal {
     pub id: String,
     pub name: String,
     pub url: String,
+    pub expirable: bool,
     pub added_at: chrono::DateTime<Utc>,
 }
 

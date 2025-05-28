@@ -26,6 +26,7 @@ pub struct AddStreamInput {
     pub name: String,
     pub source_url: String,
     pub down_scale: bool,
+    pub expirable: bool
 }
 
 pub async fn add_stream_to_state(
@@ -87,6 +88,7 @@ pub async fn add_stream_to_state(
         id: stream_info.id,
         name: stream_info.name,
         added_at: chrono::Utc::now(),
+        expirable: req.expirable
     };
     state.streams.lock().await.push(stream_info_internal);
 
@@ -143,7 +145,7 @@ pub async fn remove_stale_streams(state: State<AppState>) -> Result<String, AppE
         streams
             .iter()
             .filter(|s| {
-                (current_time - s.added_at).num_minutes() >= state.stream_expiration_time_in_minutes
+                s.expirable && (current_time - s.added_at).num_minutes() >= state.stream_expiration_time_in_minutes
             })
             .map(|s| s.id.clone())
             .collect::<Vec<String>>()
@@ -170,19 +172,19 @@ pub struct StreamInfoListItem {
     pub name: String,
     pub url: String,
     pub added_at: String,
+    pub expirable: bool
 }
 pub async fn list_streams(state: State<AppState>) -> Result<Json<Vec<StreamInfoListItem>>,   AppError> {
-    tracing::info!("Entering list_streams function");
     let mut result: Vec<StreamInfoListItem> = vec![];
     {
         let streams = state.streams.lock().await;
         for stream in streams.iter() {
-            tracing::info!("iterating over stream: {}", stream.id);
             result.push(StreamInfoListItem {
                 id: stream.id.clone(),
                 name: stream.name.clone(),
                 url: stream.url.clone(),
                 added_at: stream.added_at.to_rfc3339(),
+                expirable: stream.expirable
             });
         }
     }

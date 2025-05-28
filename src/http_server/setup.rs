@@ -137,6 +137,7 @@ pub async fn setup_and_run() -> Result<(), StartupServerError> {
                 name: e.id,
                 down_scale: false,
                 source_url: e.source_url,
+                expirable: false
             })
             .collect::<Vec<AddStreamInput>>();
 
