@@ -1,33 +1,42 @@
-use axum::{extract::{Path, State}, response::IntoResponse, Json};
+use crate::http_server::error::{InternalError, UserInputError};
+use axum::{
+    extract::{Path, State},
+    response::IntoResponse,
+    Json,
+};
 use gst_rtsp_server::prelude::{RTSPMediaExt, RTSPMediaFactoryExt, RTSPMountPointsExt};
 use serde::{Deserialize, Serialize};
 use tokio::task;
 use tracing;
-use crate::http_server::error::{InternalError, UserInputError};
 
-use super::{appstate::{AppState, StreamInfo, StreamInfoInternal}, error::AppError};
+use super::{
+    appstate::{AppState, StreamInfo, StreamInfoInternal},
+    error::AppError,
+};
 
-#[derive(Debug, Deserialize,Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AddStreamOutput {
     id: String,
     name: String,
-    url: String
+    url: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct AddStreamInput {
     pub name: String,
     pub source_url: String,
-    pub down_scale: bool
+    pub down_scale: bool,
 }
 
-pub async fn add_stream_to_state(state: AppState, req: AddStreamInput) -> Result<AddStreamOutput, AppError> {
+pub async fn add_stream_to_state(
+    state: AppState,
+    req: AddStreamInput,
+) -> Result<AddStreamOutput, AppError> {
     let media_map_clone = state.media_map.clone();
     let handle = tokio::runtime::Handle::current();
     let factory = gst_rtsp_server::RTSPMediaFactory::new();
 
     let source_url = req.source_url.clone();
-
 
     let launch = if req.down_scale {
         format!(
@@ -42,34 +51,35 @@ pub async fn add_stream_to_state(state: AppState, req: AddStreamInput) -> Result
             source_url
         )
     };
-    
+
     factory.set_launch(&launch);
 
     factory.set_shared(true);
-    let id =  ulid::Ulid::new();
+    let id = ulid::Ulid::new();
     let path = format!("/{}", id.to_string());
     let path_clone = path.clone();
     factory.connect_media_configure(move |_, media| {
-        let mut media_map = task::block_in_place(|| {
-            handle.block_on(media_map_clone.lock())
-        });
-        
+        let mut media_map = task::block_in_place(|| handle.block_on(media_map_clone.lock()));
+
         let v = media_map.entry(path_clone.clone()).or_insert_with(Vec::new);
         v.push(glib::object::ObjectExt::downgrade(&media));
     });
 
-
     let url = format!("{}{}", state.rtsp_root_url, id.to_string());
-    state.mounts.lock().await.add_factory(&path.to_string(), factory);
+    state
+        .mounts
+        .lock()
+        .await
+        .add_factory(&path.to_string(), factory);
     let stream_info = StreamInfo {
         id: id.to_string(),
         name: req.name.clone(),
-        url: url.clone()
+        url: url.clone(),
     };
     let output = AddStreamOutput {
         id: id.to_string(),
         name: req.name,
-        url
+        url,
     };
 
     let stream_info_internal = StreamInfoInternal {
@@ -85,20 +95,17 @@ pub async fn add_stream_to_state(state: AppState, req: AddStreamInput) -> Result
 
 pub async fn add_stream(
     State(state): State<AppState>,
-    Json(req): Json<AddStreamInput>
+    Json(req): Json<AddStreamInput>,
 ) -> impl IntoResponse {
-
-
-    
     match add_stream_to_state(state, req).await {
         Ok(output) => Ok(Json(output)),
         Err(err) => Err(err.into_response()),
     }
 }
 
-async fn remove_stream_by_id(id: &str, state: &State<AppState>) -> Result<(), AppError>  {
+async fn remove_stream_by_id(id: &str, state: &State<AppState>) -> Result<(), AppError> {
     let mut streams_infos = state.streams.lock().await;
-    streams_infos.retain(|e|  e.id != id);
+    streams_infos.retain(|e| e.id != id);
     let path = format!("/{}", id.to_string());
     tracing::info!("removing factory {}", path);
     state.mounts.lock().await.remove_factory(&path);
@@ -106,10 +113,8 @@ async fn remove_stream_by_id(id: &str, state: &State<AppState>) -> Result<(), Ap
     let medias = medias.get(&path);
     if let Some(medias) = medias {
         tracing::info!("{} clients found", medias.len());
-        for weak_media in  medias {
-            
+        for weak_media in medias {
             if let Some(media) = weak_media.upgrade() {
-        
                 media.unprepare().map_err(|err| {
                     AppError::InternalError(InternalError {
                         debug_message: format!("error while unpreparing media: {:?}", err),
@@ -122,11 +127,10 @@ async fn remove_stream_by_id(id: &str, state: &State<AppState>) -> Result<(), Ap
     Ok(())
 }
 
-pub async  fn remove_stream(
+pub async fn remove_stream(
     Path(id): Path<String>,
-    State(state): State<AppState> 
+    State(state): State<AppState>,
 ) -> Result<String, AppError> {
-
     remove_stream_by_id(&id, &State(state)).await?;
     Ok("Stream Removed".to_string())
 }
@@ -135,12 +139,13 @@ pub async fn remove_stale_streams(state: State<AppState>) -> Result<String, AppE
     let current_time = chrono::Utc::now();
     let stale_streams_ids = {
         let streams = state.streams.lock().await;
-        
-        streams.iter()
-            .filter(|s| { 
+
+        streams
+            .iter()
+            .filter(|s| {
                 (current_time - s.added_at).num_minutes() >= state.stream_expiration_time_in_minutes
             })
-            .map(|s| { s.id.clone()})
+            .map(|s| s.id.clone())
             .collect::<Vec<String>>()
     };
 
@@ -150,13 +155,37 @@ pub async fn remove_stale_streams(state: State<AppState>) -> Result<String, AppE
         if let Err(err) = remove_stream_by_id(stale_stream, &state).await {
             let reason = match err {
                 AppError::UserInputError(user_input_error) => user_input_error.message,
-                AppError::InternalError(internal_error) => internal_error.debug_message
+                AppError::InternalError(internal_error) => internal_error.debug_message,
             };
-            tracing::error!("Failed to remove stale stream {}: {}", stale_stream, reason );
+            tracing::error!("Failed to remove stale stream {}: {}", stale_stream, reason);
         }
     }
 
     Ok("Stale streams removed".to_owned())
 }
 
+#[derive(Debug, Serialize)]
+pub struct StreamInfoListItem {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    pub added_at: String,
+}
+pub async fn list_streams(state: State<AppState>) -> Result<Json<Vec<StreamInfoListItem>>,   AppError> {
+    tracing::info!("Entering list_streams function");
+    let mut result: Vec<StreamInfoListItem> = vec![];
+    {
+        let streams = state.streams.lock().await;
+        for stream in streams.iter() {
+            tracing::info!("iterating over stream: {}", stream.id);
+            result.push(StreamInfoListItem {
+                id: stream.id.clone(),
+                name: stream.name.clone(),
+                url: stream.url.clone(),
+                added_at: stream.added_at.to_rfc3339(),
+            });
+        }
+    }
 
+    Ok(Json(result))
+}

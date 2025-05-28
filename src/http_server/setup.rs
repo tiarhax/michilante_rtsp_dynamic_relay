@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use aws_config::BehaviorVersion;
 use axum::{
-    routing::{delete, post},
+    routing::{delete, get, post},
     Router,
 };
 
@@ -11,7 +11,7 @@ use crate::{
     http_server::{
         appstate::{AppState},
         endpoints::{
-            add_stream, add_stream_to_state, remove_stale_streams, remove_stream, AddStreamInput,
+            add_stream, add_stream_to_state, remove_stale_streams, remove_stream, list_streams, AddStreamInput,
         },
     },
     rtsp_server::{load_rtsp_server_config, start_server},
@@ -152,6 +152,7 @@ pub async fn setup_and_run() -> Result<(), StartupServerError> {
 
     let app = Router::new()
         .route("/streams", post(add_stream))
+        .route("/streams", get(list_streams))
         .route("/streams/{id}", delete(remove_stream))
         .route("/streams/stale", delete(remove_stale_streams))
         .with_state(app_state);
