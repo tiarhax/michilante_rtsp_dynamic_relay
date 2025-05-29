@@ -2,16 +2,16 @@ use std::sync::Arc;
 
 use aws_config::BehaviorVersion;
 use axum::{
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 
 use crate::{
     config::{implementation::AWSCameraConfigRepository, interface::CameraConfigRepository},
     http_server::{
-        appstate::{AppState},
+        appstate::AppState,
         endpoints::{
-            add_stream, add_stream_to_state, remove_stale_streams, remove_stream, list_streams, AddStreamInput,
+            add_stream, add_stream_to_state, list_streams, put_permanent_stream, remove_stale_streams, remove_stream, AddStreamInput, AddStreamToStateInput
         },
     },
     rtsp_server::{load_rtsp_server_config, start_server},
@@ -133,13 +133,14 @@ pub async fn setup_and_run() -> Result<(), StartupServerError> {
 
         let add_stream_inputs = cameras
             .into_iter()
-            .map(|e| AddStreamInput {
+            .map(|e| AddStreamToStateInput {
+                id: e.id.clone(),
                 name: e.id,
                 down_scale: false,
                 source_url: e.source_url,
                 expirable: false
             })
-            .collect::<Vec<AddStreamInput>>();
+            .collect::<Vec<AddStreamToStateInput>>();
 
         for add_stream_input in add_stream_inputs {
             add_stream_to_state(app_state.clone(), add_stream_input).await
@@ -155,6 +156,7 @@ pub async fn setup_and_run() -> Result<(), StartupServerError> {
         .route("/streams", post(add_stream))
         .route("/streams", get(list_streams))
         .route("/streams/{id}", delete(remove_stream))
+        .route("/streams/permanent/{id}", put(put_permanent_stream))
         .route("/streams/stale", delete(remove_stale_streams))
         .with_state(app_state);
     let bind_str = format!("{}:{}", server_config.http_host, server_config.http_port);

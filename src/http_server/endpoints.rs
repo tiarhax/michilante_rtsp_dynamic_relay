@@ -8,6 +8,7 @@ use gst_rtsp_server::prelude::{RTSPMediaExt, RTSPMediaFactoryExt, RTSPMountPoint
 use serde::{Deserialize, Serialize};
 use tokio::task;
 use tracing;
+use ulid::Ulid;
 
 use super::{
     appstate::{AppState, StreamInfo, StreamInfoInternal},
@@ -29,9 +30,26 @@ pub struct AddStreamInput {
     pub expirable: bool
 }
 
+
+#[derive(Debug, Deserialize)]
+pub struct AddStreamToStateInput {
+    pub id: String,
+    pub name: String,
+    pub source_url: String,
+    pub down_scale: bool,
+    pub expirable: bool
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddPermanentStreamInput {
+    pub name: String,
+    pub source_url: String,
+    pub down_scale: bool,
+}
+
 pub async fn add_stream_to_state(
     state: AppState,
-    req: AddStreamInput,
+    req: AddStreamToStateInput,
 ) -> Result<AddStreamOutput, AppError> {
     let media_map_clone = state.media_map.clone();
     let handle = tokio::runtime::Handle::current();
@@ -56,7 +74,7 @@ pub async fn add_stream_to_state(
     factory.set_launch(&launch);
 
     factory.set_shared(true);
-    let id = ulid::Ulid::new();
+    let id = req.id;
     let path = format!("/{}", id.to_string());
     let path_clone = path.clone();
     factory.connect_media_configure(move |_, media| {
@@ -99,13 +117,37 @@ pub async fn add_stream(
     State(state): State<AppState>,
     Json(req): Json<AddStreamInput>,
 ) -> impl IntoResponse {
-    match add_stream_to_state(state, req).await {
+    let add_stream_internal_input = AddStreamToStateInput {
+        id:  Ulid::new().to_string(),
+        name: req.name,
+        source_url: req.source_url,
+        down_scale: req.down_scale,
+        expirable: req.expirable,
+    };
+    match add_stream_to_state(state, add_stream_internal_input).await {
         Ok(output) => Ok(Json(output)),
         Err(err) => Err(err.into_response()),
     }
 }
 
-async fn remove_stream_by_id(id: &str, state: &State<AppState>) -> Result<(), AppError> {
+pub async fn put_permanent_stream(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<AddPermanentStreamInput>,
+) -> Result<Json<AddStreamOutput>, AppError>  {
+    let add_stream_internal_input = AddStreamToStateInput {
+        id:  id.clone(),
+        name: req.name,
+        source_url: req.source_url,
+        down_scale: req.down_scale,
+        expirable: false,
+    };
+    remove_stream_by_id(&add_stream_internal_input.id, &state).await?;
+    let result = add_stream_to_state(state, add_stream_internal_input).await?;
+    Ok(Json(result))
+}
+
+async fn remove_stream_by_id(id: &str, state: &AppState) -> Result<(), AppError> {
     let mut streams_infos = state.streams.lock().await;
     streams_infos.retain(|e| e.id != id);
     let path = format!("/{}", id.to_string());
@@ -129,11 +171,12 @@ async fn remove_stream_by_id(id: &str, state: &State<AppState>) -> Result<(), Ap
     Ok(())
 }
 
+
 pub async fn remove_stream(
     Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<String, AppError> {
-    remove_stream_by_id(&id, &State(state)).await?;
+    remove_stream_by_id(&id, &state).await?;
     Ok("Stream Removed".to_string())
 }
 
