@@ -14,12 +14,17 @@ pub struct StreamInfo {
 }
 
 #[derive(Clone)]
+pub enum ExpirationDate{
+    Never,
+    At(chrono::DateTime<Utc>)
+}
+#[derive(Clone)]
 pub struct StreamInfoInternal {
     pub id: String,
     pub name: String,
     pub url: String,
-    pub expirable: bool,
-    pub added_at: chrono::DateTime<Utc>,
+    pub expiration_date: ExpirationDate,
+    pub added_at: chrono::DateTime<Utc> 
 }
 
 #[derive(Clone)]

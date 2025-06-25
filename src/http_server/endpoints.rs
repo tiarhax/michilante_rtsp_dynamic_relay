@@ -1,4 +1,4 @@
-use crate::http_server::error::{InternalError, UserInputError};
+use crate::http_server::{appstate::ExpirationDate, error::{InternalError, UserInputError}};
 use axum::{
     extract::{Path, State},
     response::IntoResponse,
@@ -20,6 +20,7 @@ pub struct AddStreamOutput {
     id: String,
     name: String,
     url: String,
+    expiration_date: Option<String>
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,18 +96,30 @@ pub async fn add_stream_to_state(
         name: req.name.clone(),
         url: url.clone(),
     };
+
+
+    let expiration_date = if req.expirable {
+        let current_time = chrono::Utc::now() + chrono::Duration::minutes(state.stream_expiration_time_in_minutes);
+        ExpirationDate::At(current_time)
+    } else {
+        ExpirationDate::Never
+    };
+
     let output = AddStreamOutput {
         id: id.to_string(),
         name: req.name,
         url,
+        expiration_date: match expiration_date {
+            ExpirationDate::Never => None,
+            ExpirationDate::At(date_time) => Some(date_time.to_rfc3339()),
+        }
     };
-
     let stream_info_internal = StreamInfoInternal {
         url: stream_info.url,
         id: stream_info.id,
         name: stream_info.name,
         added_at: chrono::Utc::now(),
-        expirable: req.expirable
+        expiration_date
     };
     state.streams.lock().await.push(stream_info_internal);
 
@@ -188,7 +201,10 @@ pub async fn remove_stale_streams(state: State<AppState>) -> Result<String, AppE
         streams
             .iter()
             .filter(|s| {
-                s.expirable && (current_time - s.added_at).num_minutes() >= state.stream_expiration_time_in_minutes
+                match s.expiration_date {
+                    ExpirationDate::Never => true,
+                    ExpirationDate::At(expiration_date) => expiration_date <= current_time,
+                }
             })
             .map(|s| s.id.clone())
             .collect::<Vec<String>>()
@@ -215,7 +231,7 @@ pub struct StreamInfoListItem {
     pub name: String,
     pub url: String,
     pub added_at: String,
-    pub expirable: bool
+    pub expiration_date: Option<String>
 }
 pub async fn list_streams(state: State<AppState>) -> Result<Json<Vec<StreamInfoListItem>>,   AppError> {
     let mut result: Vec<StreamInfoListItem> = vec![];
@@ -227,7 +243,10 @@ pub async fn list_streams(state: State<AppState>) -> Result<Json<Vec<StreamInfoL
                 name: stream.name.clone(),
                 url: stream.url.clone(),
                 added_at: stream.added_at.to_rfc3339(),
-                expirable: stream.expirable
+                expiration_date: match stream.expiration_date {
+                    ExpirationDate::Never => None,
+                    ExpirationDate::At(date_time) => Some(date_time.to_rfc3339())
+                },
             });
         }
     }
