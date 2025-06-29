@@ -35,10 +35,11 @@ pub struct AppState {
     pub rtsp_root_url: String,
     pub media_map: MediaMap,
     pub stream_expiration_time_in_minutes: i64,
+    pub stream_max_life_time_in_minutes: i64
 }
 
 impl AppState {
-    pub fn new(stream_expiration_time_in_minutes: i64, root_url: &str, rtsp_root_url: &str,  mounts: RTSPMountPoints) -> Self {
+    pub fn new(stream_expiration_time_in_minutes: i64, root_url: &str, rtsp_root_url: &str,  mounts: RTSPMountPoints, stream_max_life_time_in_minutes: i64) -> Self {
         let streams: Vec<StreamInfoInternal> = vec![];
         let streams = Mutex::new(streams);
         let streams = Arc::new(streams);
@@ -56,7 +57,8 @@ impl AppState {
             root_url: root_url.to_owned(),
             media_map,
             stream_expiration_time_in_minutes,
-            rtsp_root_url: rtsp_root_url.to_owned()
+            rtsp_root_url: rtsp_root_url.to_owned(),
+            stream_max_life_time_in_minutes
         }
     }
 }

@@ -11,7 +11,8 @@ use crate::{
     http_server::{
         appstate::AppState,
         endpoints::{
-            add_stream, add_stream_to_state, list_streams, put_permanent_stream, remove_stale_streams, remove_stream, AddStreamInput, AddStreamToStateInput
+            add_stream, add_stream_to_state, list_streams, put_permanent_stream,
+            remove_stale_streams, remove_stream, AddStreamInput, AddStreamToStateInput,
         },
     },
     rtsp_server::{load_rtsp_server_config, start_server},
@@ -31,10 +32,11 @@ struct ServerConfig {
     pub http_port: i32,
     pub http_host: String,
     pub stream_expiration_time_in_minutes: i64,
+    pub stream_max_life_time_in_minutes: i64,
     pub root_url: String,
     pub load_default_streams: bool,
     pub table_name: String,
-    pub partition_key: String
+    pub partition_key: String,
 }
 fn read_config() -> Result<ServerConfig, ReadConfigErr> {
     let http_port: i32 = std::env::var("HTTP_PORT")
@@ -49,6 +51,15 @@ fn read_config() -> Result<ServerConfig, ReadConfigErr> {
     let http_host: String = std::env::var("HTTP_HOST").map_err(|_| ReadConfigErr {
         reason: "HTTP_HOST not set".to_string(),
     })?;
+
+    let stream_max_life_time_in_minutes: i64 = std::env::var("STREAM_MAX_LIFE_TIME_IN_MINUTES")
+        .map_err(|_| ReadConfigErr {
+            reason: "STREAM_MAX_LIFE_TIME_IN_MINUTES not set or invalid".to_string(),
+        })?
+        .parse()
+        .map_err(|_| ReadConfigErr {
+            reason: "STREAM_MAX_LIFE_TIME_IN_MINUTES must be a valid integer".to_string(),
+        })?;
 
     let stream_expiration_time_in_minutes: i64 = std::env::var("STREAM_EXPIRATION_TIME_IN_MINUTES")
         .map_err(|_| ReadConfigErr {
@@ -71,15 +82,13 @@ fn read_config() -> Result<ServerConfig, ReadConfigErr> {
         .map_err(|_| ReadConfigErr {
             reason: "LOAD_DEFAULT_STREAMS must be a valid boolean".to_string(),
         })?;
-    let table_name = std::env::var("TABLE_NAME")
-        .map_err(|_| ReadConfigErr {
-            reason: "TABLE_NAME not set or invalid".to_string(),
-        })?;
+    let table_name = std::env::var("TABLE_NAME").map_err(|_| ReadConfigErr {
+        reason: "TABLE_NAME not set or invalid".to_string(),
+    })?;
 
-    let partition_key = std::env::var("PARTITION_KEY")
-        .map_err(|_| ReadConfigErr {
-            reason: "PARTITION_KEY not set or invalid".to_string(),
-        })?;
+    let partition_key = std::env::var("PARTITION_KEY").map_err(|_| ReadConfigErr {
+        reason: "PARTITION_KEY not set or invalid".to_string(),
+    })?;
 
     Ok(ServerConfig {
         http_port,
@@ -89,6 +98,7 @@ fn read_config() -> Result<ServerConfig, ReadConfigErr> {
         load_default_streams,
         table_name,
         partition_key,
+        stream_max_life_time_in_minutes,
     })
 }
 
@@ -114,13 +124,14 @@ pub async fn setup_and_run() -> Result<(), StartupServerError> {
         &server_config.root_url,
         &mount_points.root_url.clone().to_owned(),
         mount_points.mount_points,
+        server_config.stream_max_life_time_in_minutes,
     );
 
     if server_config.load_default_streams {
         let camera_config = AWSCameraConfigRepository::new(
             aws_config::load_defaults(BehaviorVersion::v2025_01_17()).await,
             server_config.table_name,
-            server_config.partition_key
+            server_config.partition_key,
         )
         .await;
         let cameras = match camera_config.list_all().await {
@@ -138,16 +149,15 @@ pub async fn setup_and_run() -> Result<(), StartupServerError> {
                 name: e.id,
                 down_scale: false,
                 source_url: e.source_url,
-                expirable: false
+                expirable: false,
             })
             .collect::<Vec<AddStreamToStateInput>>();
 
         for add_stream_input in add_stream_inputs {
-            add_stream_to_state(app_state.clone(), add_stream_input).await
-                .map_err(|e| {
-                    StartupServerError {
-                        reason: format!("Failed to add default stream: {:?}", e),
-                    }
+            add_stream_to_state(app_state.clone(), add_stream_input)
+                .await
+                .map_err(|e| StartupServerError {
+                    reason: format!("Failed to add default stream: {:?}", e),
                 })?;
         }
     }
